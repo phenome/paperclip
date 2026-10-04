@@ -1919,6 +1919,46 @@ class OpenCodeHarnessSession implements HarnessSession {
   }
 }
 
+/**
+ * Roots the agent must be able to write outside its workspace.
+ *
+ * `/paperclip/PREVIEW-PUBLISHING.md` documents publishing as a direct write into
+ * `/paperclip/previews/<folder>/`: "Files become available immediately as they
+ * are written". That write is denied today, because `external_directory` only
+ * carried a blanket deny plus the read-only instruction root, so `cp`, `tar` and
+ * shell redirection into the preview tree are rejected even though the operating
+ * system lets the same user write there. The `publish-static-preview` flow
+ * therefore cannot complete its final step.
+ *
+ * `.preview-backups` is the companion staging area for the guide's
+ * "prepare replacements outside `/paperclip/previews`, then move finished files
+ * into place on the same filesystem" step.
+ */
+const EXTERNAL_WRITE_ROOTS = [
+  "/paperclip/previews",
+  "/paperclip/.preview-backups",
+] as const;
+
+/**
+ * Build the `external_directory` permission map for a native runtime session.
+ *
+ * Insertion order is significant: OpenCode matches these patterns in order and
+ * the last match wins, so the blanket `"*": "deny"` must be inserted first and
+ * every `**` allow after it. An allow declared before the deny is silently
+ * shadowed -- observed live, where an `/tmp/opencode/*` allow declared earlier
+ * in the merged rule set still lost to this deny and the write was rejected.
+ */
+function externalDirectoryPermission(
+  instructionRoot: string,
+): Record<string, "allow" | "deny"> {
+  const permission: Record<string, "allow" | "deny"> = { "*": "deny" };
+  for (const root of EXTERNAL_WRITE_ROOTS) {
+    permission[`${root}/**`] = "allow";
+  }
+  permission[`${instructionRoot}/**`] = "allow";
+  return permission;
+}
+
 async function startRuntime(input: {
   options: OpenCodeServerDriverOptions;
   root: string;
@@ -2009,7 +2049,7 @@ async function startRuntime(input: {
       "paperclip_*": "allow",
       "mcp__paperclip__*": "allow",
       external_directory: instructionRoot
-        ? { "*": "deny", [`${instructionRoot}/**`]: "allow" }
+        ? externalDirectoryPermission(instructionRoot)
         : "deny",
     },
     mcp: {

@@ -1359,6 +1359,27 @@ describe("OpenCodeServerDriver", () => {
         },
       },
     });
+
+    // /paperclip/PREVIEW-PUBLISHING.md publishes by writing straight into
+    // /paperclip/previews/<folder>/, so those roots must be writable rather than
+    // only readable, otherwise the publish-static-preview flow cannot finish.
+    const externalDirectory = config.permission.external_directory as Record<
+      string,
+      string
+    >;
+    expect(externalDirectory["/paperclip/previews/**"]).toBe("allow");
+    expect(externalDirectory["/paperclip/.preview-backups/**"]).toBe("allow");
+    // OpenCode resolves the last matching pattern, so the blanket deny must stay
+    // ahead of every allow or it silently shadows them again.
+    const externalDirectoryKeys = Object.keys(externalDirectory);
+    expect(externalDirectoryKeys[0]).toBe("*");
+    for (const writable of [
+      "/paperclip/previews/**",
+      "/paperclip/.preview-backups/**",
+      `${instructionRoot}/**`,
+    ]) {
+      expect(externalDirectoryKeys.indexOf(writable)).toBeGreaterThan(0);
+    }
     await expect(
       readFile(join(instructionRoot, "sibling.md"), "utf8"),
     ).resolves.toBe("instruction sibling\n");
